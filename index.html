@@ -534,7 +534,7 @@ function renderSets(day,ex,sess,orms,ovr,readOnly){
     const pfW=isActive&&isDone?sd.w:(pd?pd.w:(sw>0?sw:''));
     const pfR=isActive&&isDone?sd.r:(ex.reps.includes('–')?ex.reps.split('–')[0]:ex.reps.replace(/[^\d].*/,''));
     const clickable=!readOnly;
-    html+=`<div class="set-row${isDone?' done':''}${isActive?' active':''}${readOnly?' read-only':''}" ${clickable?`onclick="activateSet('${day.id}','${ex.id}',${i},${day.rest})"`:''}>
+    html+=`<div class="set-row${isDone?' done':''}${isActive?' active':''}${readOnly?' read-only':''}" ${clickable?`onclick="toggleActiveSet('${day.id}','${ex.id}',${i},${day.rest})"`:''}>
 <div class="set-row-top">
   <div class="set-num">Set ${i+1}</div>
   <div class="set-target">
@@ -545,7 +545,7 @@ function renderSets(day,ex,sess,orms,ovr,readOnly){
   </div>
 </div>
 ${!isDone&&pd?`<div class="set-last">prev: <span>${pd.w>0?pd.w+'lb':'—'} × ${pd.r}</span></div>`:''}
-${isActive?`<div class="set-input-row">
+${isActive?`<div class="set-input-row" onclick="event.stopPropagation()">
 <div class="set-input-fields">
   <div class="input-group"><label>Weight (lb)</label><input type="number" id="iw-${day.id}-${ex.id}-${i}" value="${pfW}" min="0" step="5" inputmode="decimal"></div>
   <div class="input-group"><label>Reps</label><input type="text" id="ir-${day.id}-${ex.id}-${i}" value="${pfR}" inputmode="decimal"></div>
@@ -566,6 +566,13 @@ function toggleEx(dayId,exId){
   const k=dayId+'_'+exId; S.openEx.has(k)?S.openEx.delete(k):S.openEx.add(k);
   renderWorkout();
   requestAnimationFrame(()=>{ const el=document.querySelector('.ex-item.open'); if(el) el.scrollIntoView({behavior:'smooth',block:'nearest'}); });
+}
+function toggleActiveSet(dayId,exId,setIdx,rest){
+  if(S.activeSet&&S.activeSet.dayId===dayId&&S.activeSet.exId===exId&&S.activeSet.setIdx===setIdx){
+    S.activeSet=null; renderWorkout();
+  } else {
+    activateSet(dayId,exId,setIdx,rest);
+  }
 }
 function activateSet(dayId,exId,setIdx,rest){
   S.openEx.add(dayId+'_'+exId); S.activeSet={dayId,exId,setIdx};
@@ -589,14 +596,24 @@ function logSet(dayId,exId,setIdx,restDur){
 
 // ── TIMER ─────────────────────────────────────────────────────────────────
 function startTimer(dur){
-  clearInterval(S.timer.iv); S.timer.dur=dur; S.timer.rem=dur; S.timer.active=true; S.timer.editOpen=false;
+  clearInterval(S.timer.iv);
+  S.timer.dur=dur;
+  S.timer.endTime=Date.now()+dur*1000;
+  S.timer.active=true;
+  S.timer.editOpen=false;
   document.getElementById('timer-bar').classList.add('active');
   document.getElementById('timer-edit-row').classList.remove('visible');
   updateTimerUI();
-  S.timer.iv=setInterval(()=>{ S.timer.rem--; if(S.timer.rem<=0){clearInterval(S.timer.iv);S.timer.rem=0;timerDone();} updateTimerUI(); },1000);
+  S.timer.iv=setInterval(()=>{
+    S.timer.rem=Math.max(0,Math.round((S.timer.endTime-Date.now())/1000));
+    if(S.timer.rem<=0){clearInterval(S.timer.iv);timerDone();}
+    updateTimerUI();
+  },500);
 }
 function updateTimerUI(){
-  const{rem,dur}=S.timer, m=Math.floor(rem/60),s=rem%60,pct=dur>0?(rem/dur)*100:0,urg=rem<=15&&rem>0;
+  const rem=S.timer.rem!=null?S.timer.rem:S.timer.dur;
+  const dur=S.timer.dur;
+  const m=Math.floor(rem/60),s=rem%60,pct=dur>0?(rem/dur)*100:0,urg=rem<=15&&rem>0;
   const d=document.getElementById('timer-display'),f=document.getElementById('timer-fill');
   if(d){d.textContent=`${m}:${String(s).padStart(2,'0')}`;d.className='timer-display'+(urg?' urgent':'');}
   if(f){f.style.width=pct+'%';f.className='timer-fill'+(urg?' urgent':'');}
@@ -620,6 +637,18 @@ function applyTimerEdit(){
   if(m*60+s>0) startTimer(m*60+s);
   S.timer.editOpen=false; document.getElementById('timer-edit-row').classList.remove('visible');
 }
+
+// catch up timer instantly when returning from background
+document.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState==='visible'&&S.timer.active&&S.timer.endTime){
+    S.timer.rem=Math.max(0,Math.round((S.timer.endTime-Date.now())/1000));
+    if(S.timer.rem<=0){
+      clearInterval(S.timer.iv);
+      timerDone();
+    }
+    updateTimerUI();
+  }
+});
 
 // ── CYCLE OVERVIEW ────────────────────────────────────────────────────────
 function renderCycleOverview(){
